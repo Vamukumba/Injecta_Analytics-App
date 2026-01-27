@@ -1,0 +1,10 @@
+streamlit
+pymongo
+geopandas
+folium
+streamlit-folium
+shapely
+osmnx
+pandas
+branca
+fpdf
