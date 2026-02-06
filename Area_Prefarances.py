@@ -319,9 +319,9 @@ def main():
             radius = st.sidebar.slider("Radius (m)", 500, 5000, 1000)
             
             if st.session_state['analysis_active']:
-                if st.sidebar.button("🔄 Reset"): st.session_state['analysis_active'] = False; st.rerun()
+                if st.sidebar.button("Reset"): st.session_state['analysis_active'] = False; st.rerun()
             else:
-                if st.sidebar.button("🚀 Analyze"): st.session_state['analysis_active'] = True; st.rerun()
+                if st.sidebar.button("Analyze"): st.session_state['analysis_active'] = True; st.rerun()
 
             st.sidebar.markdown("Watch Video For More Insights")
             video_filename = "intro_video.mp4"
@@ -425,9 +425,9 @@ def main():
                 st.session_state['selected_strategy'] = final_strategy
                 
                 st.markdown(f"""<div class="zone-info-box">
-                <span style="font-size:18px;">📍 <b>Location:</b> {display_text_suburbs}</span><br>
-                <span style="color:#0F2C59; font-weight:bold;">📊 Density:</span> <span style="color:#e67e22; font-weight:bold;">{final_strategy}</span><br>
-                <span style="font-size:14px;">👥 <b>{display_pop_label}:</b> {display_pop_val}</span>
+                <span style="font-size:18px;"><b>Location:</b> {display_text_suburbs}</span><br>
+                <span style="color:#0F2C59; font-weight:bold;">Density:</span> <span style="color:#e67e22; font-weight:bold;">{final_strategy}</span><br>
+                <span style="font-size:14px;"><b>{display_pop_label}:</b> {display_pop_val}</span>
                 </div>""", unsafe_allow_html=True)
 
             m = folium.Map(location=[st.session_state['lat'], st.session_state['lon']], zoom_start=14)
@@ -667,7 +667,7 @@ def main():
                     }
                 }
                 
-                st.success("✅ Analysis Complete! Go to the 'Reporting' tab to download your PDF.")
+                st.success("Analysis Complete! Go to the 'Reporting' tab to download your PDF.")
 
         elif selection == "Reporting":
             st.title("Strategic Reporting")
@@ -690,7 +690,7 @@ def main():
                 pdf_bytes = generate_pdf(res['suburb_text'], res['strategy'], res['recommendations'], res['stats'])
                 
                 st.download_button(
-                    label="📥 Download Full Strategic Report (PDF)",
+                    label="Download Full Strategic Report (PDF)",
                     data=pdf_bytes,
                     file_name="Injecta_Analytics_Report.pdf",
                     mime="application/pdf"
@@ -718,3 +718,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
