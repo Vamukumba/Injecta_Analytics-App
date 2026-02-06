@@ -12,6 +12,7 @@ import pandas as pd
 from branca.element import Template, MacroElement
 from fpdf import FPDF
 import base64
+import numpy as np
 
 # --- CONFIGURE TIMEOUT ---
 ox.settings.timeout = 180 
@@ -23,7 +24,6 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 GEOJSON_FILENAME = "suburbs.geojson"
 GEOJSON_PATH = os.path.join(SCRIPT_DIR, GEOJSON_FILENAME)
 
-# THE INJECTA WEBSITE HTML
 INJECTA_WEBSITE_HTML = """
 <!doctype html><html prefix="og: http://ogp.me/ns#" lang="en">
 <head>
@@ -224,24 +224,35 @@ class MapLegend(MacroElement):
         </div>
         {% endmacro %}""")
 
-def generate_pdf(suburb, strategy, recommendations):
+def generate_pdf(suburb_text, strategy, recommendations, overall_stats):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", 'B', 16)
     pdf.set_text_color(15, 44, 89)
     pdf.cell(0, 10, "Injecta Analytics - Strategic Report", ln=True, align='C')
     pdf.ln(10)
+    
+    # Suburb Info
     pdf.set_font("Arial", 'B', 12)
     pdf.set_text_color(0, 0, 0)
-    pdf.cell(0, 10, f"Location: {suburb}", ln=True)
-    pdf.cell(0, 10, f"Density Profile: {strategy}", ln=True)
-    pdf.ln(10)
+    pdf.multi_cell(0, 6, f"Location Info: {suburb_text}")
+    pdf.cell(0, 8, f"Density Profile: {strategy}", ln=True)
+    pdf.ln(5)
+
+    # Overall View
+    pdf.set_font("Arial", 'B', 14)
+    pdf.cell(0, 10, "Overall Site View:", ln=True)
+    pdf.set_font("Arial", '', 10)
+    for key, val in overall_stats.items():
+        pdf.cell(0, 6, f"- {key}: {val}", ln=True)
+    pdf.ln(5)
+
+    # Recommendations
     pdf.set_font("Arial", 'B', 14)
     pdf.cell(0, 10, "Strategic Recommendations:", ln=True)
     pdf.set_font("Arial", '', 11)
     
     for rec in recommendations:
-        # Wrap text to handle long paragraphs
         clean_rec = rec.encode('latin-1', 'replace').decode('latin-1')
         pdf.multi_cell(0, 8, f"- {clean_rec}")
         pdf.ln(3)
@@ -258,13 +269,14 @@ st.set_page_config(layout="wide", page_title="Injecta Market-Match", initial_sid
 inject_custom_css()
 
 # Session State
-for key in ['logged_in', 'username', 'analysis_active', 'lat', 'lon', 'recommendations', 'selected_suburb', 'selected_strategy']:
+for key in ['logged_in', 'username', 'analysis_active', 'lat', 'lon', 'recommendations', 'selected_suburb', 'selected_strategy', 'analysis_results']:
     if key not in st.session_state:
         if key == 'lat': val = -17.8252
         elif key == 'lon': val = 31.0335
         elif key == 'recommendations': val = []
         elif key == 'selected_suburb': val = "Unknown"
         elif key == 'selected_strategy': val = "Standard"
+        elif key == 'analysis_results': val = None
         else: val = False if key in ['logged_in','analysis_active'] else ''
         st.session_state[key] = val
 
@@ -298,78 +310,125 @@ def main():
         
         st.sidebar.markdown("---")
         st.sidebar.markdown(f"{st.session_state['username']}")
-        if st.sidebar.button("Log Out"): st.session_state.update({'logged_in':False, 'analysis_active':False}); st.rerun()
+        if st.sidebar.button("Log Out"): st.session_state.update({'logged_in':False, 'analysis_active':False, 'analysis_results':None}); st.rerun()
         
         st.sidebar.markdown("---")
-        st.sidebar.header("Radius Adjustments Bar")
-        radius = st.sidebar.slider("Radius (m)", 500, 5000, 1000)
         
-        if st.session_state['analysis_active']:
-            if st.sidebar.button("🔄 Reset"): st.session_state['analysis_active'] = False; st.rerun()
-        else:
-            if st.sidebar.button("🚀 Analyze"): st.session_state['analysis_active'] = True; st.rerun()
+        if selection == "Market Engine":
+            st.sidebar.header("Radius Adjustments Bar")
+            radius = st.sidebar.slider("Radius (m)", 500, 5000, 1000)
+            
+            if st.session_state['analysis_active']:
+                if st.sidebar.button("🔄 Reset"): st.session_state['analysis_active'] = False; st.rerun()
+            else:
+                if st.sidebar.button("🚀 Analyze"): st.session_state['analysis_active'] = True; st.rerun()
 
-        st.sidebar.markdown("Watch Video For More Insights")
-        # --- LOCAL VIDEO PLAYER ---
-        # Ensure 'intro_video.mp4' is in the same folder as this script
-        video_filename = "intro_video.mp4"
-        video_path = os.path.join(SCRIPT_DIR, video_filename)
-        
-        if os.path.exists(video_path):
-            try:
-                with open(video_path, "rb") as f:
-                    video_bytes = f.read()
-                    b64 = base64.b64encode(video_bytes).decode()
-                    
-                st.sidebar.markdown(f"""
-                    <video width="100%" autoplay loop muted playsinline style="border-radius: 5px;">
-                        <source src="data:video/mp4;base64,{b64}" type="video/mp4">
-                        Your browser does not support the video tag.
-                    </video>
-                    <div style="font-size:11px;color:#ccc;text-align:center;">Live Analytics Feed</div>
-                """, unsafe_allow_html=True)
-            except Exception as e:
-                st.sidebar.error(f"Error loading video: {e}")
-        else:
-            # Fallback if file is missing
-            st.sidebar.warning(f"File '{video_filename}' not found. Please place it in the app folder.")
+            st.sidebar.markdown("Watch Video For More Insights")
+            video_filename = "intro_video.mp4"
+            video_path = os.path.join(SCRIPT_DIR, video_filename)
+            
+            if os.path.exists(video_path):
+                try:
+                    with open(video_path, "rb") as f:
+                        video_bytes = f.read()
+                        b64 = base64.b64encode(video_bytes).decode()
+                    st.sidebar.markdown(f"""
+                        <video width="100%" autoplay loop muted playsinline style="border-radius: 5px;">
+                            <source src="data:video/mp4;base64,{b64}" type="video/mp4">
+                        </video>
+                        <div style="font-size:11px;color:#ccc;text-align:center;">Live Analytics Feed</div>
+                    """, unsafe_allow_html=True)
+                except: pass
+            else:
+                st.sidebar.warning(f"File '{video_filename}' not found.")
 
         # --- MAIN AREA ---
         st.markdown("<div class='main-title'>INJECTA ANALYTICS MARKET ENGINE</div><div class='main-subtitle'>Explore the best potential market places with us</div>", unsafe_allow_html=True)
 
         if selection == "Market Engine":
+            if 'radius' not in locals(): radius = 1000
+
             gdf_suburbs = load_map_data()
-            match = gpd.GeoDataFrame(); avg_pop = "N/A"; income_strat = "Medium Density"
-            suburb_names_display = "No Zone Selected"
             
+            # --- CONTEXT CALCULATION VARS ---
+            match = gpd.GeoDataFrame()
+            display_text_suburbs = "No Zone Selected"
+            display_pop_label = "Population"
+            display_pop_val = "N/A"
+            final_strategy = "Medium Density" # default
+
             if gdf_suburbs is not None:
                 try:
+                    # Create radius buffer
                     pt = gpd.GeoDataFrame(geometry=[Point(st.session_state['lon'], st.session_state['lat'])], crs="EPSG:4326")
                     buf = pt.to_crs(epsg=3857).buffer(radius).to_crs(epsg=4326)
+                    
+                    # Intersect to find ALL affected suburbs
                     match = gdf_suburbs[gdf_suburbs.intersects(buf.geometry.iloc[0])]
+                    
                     if not match.empty:
                         cols = match.columns.str.lower()
-                        if 'name' in cols: suburb_names_display = ", ".join(match[match.columns[cols == 'name'][0]].tolist())
+                        # Extract Names
+                        name_col = match.columns[cols == 'name'][0] if 'name' in cols else None
+                        found_names = match[name_col].tolist() if name_col else []
                         
-                        total = 0; count = 0
-                        for _, r in match.iterrows():
+                        # Logic: Single vs Multiple Boundaries
+                        if len(match) > 1:
+                            display_text_suburbs = f"The site selected is bordered by these suburbs: {', '.join(found_names)}"
+                            display_pop_label = "Average Population"
+                            
+                            # Calculate Average Density (Mode)
+                            if 'density' in cols:
+                                dens_col = match.columns[cols=='density'][0]
+                                modes = match[dens_col].mode()
+                                if not modes.empty:
+                                    raw_strat = str(modes[0])
+                                    if "High" in raw_strat: final_strategy = "High Density"
+                                    elif "Low" in raw_strat: final_strategy = "Low Density"
+                                    else: final_strategy = "Medium Density"
+                            
+                            # Calculate Average Population
+                            total_pop = 0; count_pop = 0
+                            for _, r in match.iterrows():
+                                for p in ['pop', 'population', 'pop_est']:
+                                    if p in cols:
+                                        try: 
+                                            total_pop += int(str(r[match.columns[cols==p][0]]).replace(",",""))
+                                            count_pop += 1; break
+                                        except: pass
+                            if count_pop > 0:
+                                display_pop_val = f"{int(total_pop / count_pop):,}"
+
+                        else:
+                            # Single Boundary Logic
+                            display_text_suburbs = found_names[0] if found_names else "Unknown"
+                            display_pop_label = "Population"
+                            
+                            if 'density' in cols:
+                                d = str(match.iloc[0][match.columns[cols=='density'][0]])
+                                if "High" in d: final_strategy = "High Density"
+                                elif "Low" in d: final_strategy = "Low Density"
+                                else: final_strategy = "Medium Density"
+                            
+                            # Population
                             for p in ['pop', 'population', 'pop_est']:
                                 if p in cols:
-                                    try: total += int(str(r[match.columns[cols==p][0]]).replace(",","")); count += 1; break
+                                    try: 
+                                        val = int(str(match.iloc[0][match.columns[cols==p][0]]).replace(",",""))
+                                        display_pop_val = f"{val:,}"
+                                        break
                                     except: pass
-                        if count > 0: avg_pop = f"{int(total/count):,}" if count > 1 else f"{total:,}"
-
-                        if 'density' in cols:
-                            d = str(match.iloc[0][match.columns[cols=='density'][0]])
-                            if "High" in d: income_strat = "High Density"
-                            elif "Low" in d: income_strat = "Low Density"
-                            else: income_strat = "Medium Density"
                 except: pass
 
             if not match.empty:
-                st.session_state['selected_suburb'] = suburb_names_display
-                st.session_state['selected_strategy'] = income_strat
-                st.markdown(f"""<div class="zone-info-box"><span style="font-size:18px;">📍 <b>Zone Detected:</b> {suburb_names_display}</span><br><span style="color:#0F2C59; font-weight:bold;">📊 Strategy Profile:</span> <span style="color:#e67e22; font-weight:bold;">{income_strat}</span></div>""", unsafe_allow_html=True)
+                st.session_state['selected_suburb'] = display_text_suburbs
+                st.session_state['selected_strategy'] = final_strategy
+                
+                st.markdown(f"""<div class="zone-info-box">
+                <span style="font-size:18px;">📍 <b>Location:</b> {display_text_suburbs}</span><br>
+                <span style="color:#0F2C59; font-weight:bold;">📊 Density:</span> <span style="color:#e67e22; font-weight:bold;">{final_strategy}</span><br>
+                <span style="font-size:14px;">👥 <b>{display_pop_label}:</b> {display_pop_val}</span>
+                </div>""", unsafe_allow_html=True)
 
             m = folium.Map(location=[st.session_state['lat'], st.session_state['lon']], zoom_start=14)
             folium.Marker([st.session_state['lat'], st.session_state['lon']], icon=folium.Icon(color="red", icon="home")).add_to(m)
@@ -377,12 +436,18 @@ def main():
             if not match.empty: folium.GeoJson(match, style_function=lambda x: {'fillColor': '#0c25f7', 'color': '#0c25f7', 'weight': 2, 'fillOpacity': 0.0}).add_to(m)
 
             schools=gpd.GeoDataFrame(); health=gpd.GeoDataFrame(); bus=gpd.GeoDataFrame()
-            markets=gpd.GeoDataFrame(); supermarkets=gpd.GeoDataFrame(); finance=gpd.GeoDataFrame(); alcohol=gpd.GeoDataFrame()
+            markets=gpd.GeoDataFrame(); supermarkets=gpd.GeoDataFrame(); finance=gpd.GeoDataFrame()
+            alcohol=gpd.GeoDataFrame(); universities=gpd.GeoDataFrame()
 
             if st.session_state['analysis_active']:
                 with st.spinner("Processing..."):
                     try:
-                        tags = {'amenity':['school','clinic','hospital','marketplace','bar','pub','bank'], 'highway':['bus_stop'], 'shop':['supermarket','alcohol']}
+                        # Updated tags to include Universities/Colleges
+                        tags = {
+                            'amenity': ['school','college','university','clinic','hospital','marketplace','bar','pub','bank'], 
+                            'highway': ['bus_stop'], 
+                            'shop': ['supermarket','alcohol']
+                        }
                         f = ox.features_from_point((st.session_state['lat'], st.session_state['lon']), tags, dist=radius)
                         cp = gpd.GeoSeries([Point(st.session_state['lon'], st.session_state['lat'])], crs="EPSG:4326").to_crs(epsg=3857).buffer(radius).to_crs(epsg=4326).iloc[0]
                         if not f.empty:
@@ -390,10 +455,15 @@ def main():
                             if not f.empty:
                                 if 'name' not in f.columns: f['name'] = "Unknown"
                                 def gc(d,k,v): return d[d[k].isin(v)] if k in d.columns else gpd.GeoDataFrame()
-                                schools=gc(f,'amenity',['school']); health=gc(f,'amenity',['clinic','hospital'])
-                                markets=gc(f,'amenity',['marketplace']); bus=gc(f,'highway',['bus_stop'])
-                                supermarkets=gc(f,'shop',['supermarket']); finance=gc(f,'amenity',['bank'])
-                                alcohol=pd.concat([gc(f,'amenity',['bar','pub']), gc(f,'shop',['alcohol'])])
+                                
+                                schools = gc(f,'amenity',['school'])
+                                universities = gc(f,'amenity',['college','university'])
+                                health = gc(f,'amenity',['clinic','hospital'])
+                                markets = gc(f,'amenity',['marketplace'])
+                                bus = gc(f,'highway',['bus_stop'])
+                                supermarkets = gc(f,'shop',['supermarket'])
+                                finance = gc(f,'amenity',['bank'])
+                                alcohol = pd.concat([gc(f,'amenity',['bar','pub']), gc(f,'shop',['alcohol'])])
                     except: pass
                 
                 def ad(g,c): 
@@ -401,13 +471,17 @@ def main():
                         for _,r in g.iterrows():
                             gm=r.geometry if r.geometry.geom_type=='Point' else r.geometry.centroid
                             folium.CircleMarker([gm.y,gm.x], radius=5, color="white", fill_color=c, fill_opacity=1, tooltip=str(r.get('name',''))).add_to(m)
-                ad(schools,"#006400"); ad(health,"#00008B"); ad(markets,"#cf1a07")
+                
+                ad(schools,"#006400"); ad(universities, "#006400") 
+                ad(health,"#00008B"); ad(markets,"#cf1a07")
                 ad(supermarkets,"#f8f334"); ad(finance,"#9b59b6"); ad(bus,"#3498db")
                 m.add_child(MapLegend())
 
             m.add_child(folium.LatLngPopup())
             st.write("") 
-            map_out = st_folium(m, height=450, width=1500)
+            
+            map_out = st_folium(m, height=450, width=1500, returned_objects=["last_clicked"])
+            
             if map_out and map_out.get("last_clicked"):
                 if abs(map_out["last_clicked"]["lat"] - st.session_state['lat']) > 0.0001:
                     st.session_state['lat'] = map_out["last_clicked"]["lat"]; st.session_state['lon'] = map_out["last_clicked"]["lng"]; st.rerun()
@@ -422,145 +496,225 @@ def main():
                 def get_nearest_details(gdf_features, user_point):
                     if gdf_features.empty:
                         return 99999, "None"
-                    # Reproject to meters (Zone 36S for Zim)
                     gdf_meters = gdf_features.to_crs(epsg=32736)
                     user_meters = gpd.GeoSeries([user_point], crs="EPSG:4326").to_crs(epsg=32736).iloc[0]
-                    
                     distances = gdf_meters.distance(user_meters)
                     min_idx = distances.idxmin()
                     min_dist = distances.min()
                     
-                    # Try to get a name
-                    feat_name = gdf_features.loc[min_idx].get('name', 'Unknown Location')
-                    return min_dist, str(feat_name)
+                    feat_name = str(gdf_features.loc[min_idx].get('name', 'Unknown'))
+                    if feat_name.lower() in ['nan', 'none', 'unknown', '']:
+                        feat_name = f"'nan' (unfortunately we can't find the name)"
+                    
+                    return min_dist, feat_name
 
-                # --- CALCULATE METRICS ---
                 user_pt = Point(st.session_state['lon'], st.session_state['lat'])
                 
                 dist_super, name_super = get_nearest_details(supermarkets, user_pt)
                 dist_school, name_school = get_nearest_details(schools, user_pt)
+                dist_uni, name_uni = get_nearest_details(universities, user_pt)
                 dist_health, name_health = get_nearest_details(health, user_pt)
-                dist_night, name_night = get_nearest_details(alcohol, user_pt)
+                dist_bank, name_bank = get_nearest_details(finance, user_pt)
                 
-                recommendations = [] # For PDF
+                # Count bars for logic
+                bar_count = len(alcohol)
                 
-                # Show Population Context
-                pop_str = f" | Est. Population: {avg_pop}" if avg_pop != "N/A" else ""
-                st.info(f"**Market Context:** {income_strat}{pop_str}")
+                recommendations = []
+                
+                # --- INTRO CONTEXT ---
+                bank_context = f" Furthermore, we found a Bank ({name_bank}) nearby, which strengthens these recommendations." if dist_bank < 800 else ""
+                
+                intro_msg = f"The area selected is a {final_strategy} with the {display_pop_label} of {display_pop_val}.{bank_context}"
+                st.info(intro_msg)
                 
                 col1, col2 = st.columns(2)
                 
-                # --- LOGIC 1: RETAIL & STOCK ---
+                # --- LOGIC 1: RETAIL STRATEGY (Pure Retail: Grocery, Clothing, Hardware) ---
                 with col1:
-                    st.markdown('<div class="insight-card border-blue"><div class="card-title">Retail & Stock</div>', unsafe_allow_html=True)
-                    msg = ""
+                    st.markdown('<div class="insight-card border-blue"><div class="card-title">Retail Strategy</div>', unsafe_allow_html=True)
+                    msg_retail = ""
                     
-                    if income_strat == "High Density":
-                        if dist_super > 400:
-                            msg = f"**High Density Opportunity:** The nearest major supermarket ('{name_super}') is {int(dist_super)}m away. This gap creates a prime catchment area for a **Grocery Shop** (stocking small packages + bulk) or a high-volume **Tuckshop/Vending** point."
-                        else:
-                            msg = f"**High Competition Zone:** You are located {int(dist_super)}m from '{name_super}'. Avoid general groceries. **Strongly Recommend:** A specialized Tuckshop focusing on micro-packaging (sachets) and cheaper alternatives to the main supermarket."
-                            
-                    elif income_strat == "Low Density":
-                        if dist_super > 400:
-                            msg = f"**Prime Retail Location:** With '{name_super}' being {int(dist_super)}m away, this site is ideal for a **Full Supermarket**, **Liquor Store**, or specialized **Horticulture/Clothing** outlet to serve the affluent demographic."
-                        else:
-                            msg = f"**Niche Market Only:** Proximity to '{name_super}' ({int(dist_super)}m) makes general retail risky. Pivot to specialized services: **Boutique Clothing** or **Organic Horticulture**."
-                            
-                    else: # Medium Density
-                        if dist_super > 400:
-                            msg = f"**Medium Density Gap:** '{name_super}' is {int(dist_super)}m away. Recommended: **General Grocery Shop** bridging the gap between tuckshop and supermarket styles."
-                        else:
-                            msg = f"**Competitive Zone:** Proximity to '{name_super}' ({int(dist_super)}m) suggests focusing on convenience: **Tuckshop** or **Vending** for quick stop-and-go items."
+                    # PRIORITY 1: University Nearby -> Specific Retail
+                    if dist_uni < 500:
+                        msg_retail = f"**Tertiary Hub detected!!:** The site is less than 500 meters from a Polytechnic, College, or University ('{name_uni}'). Therefore the largely affected population are students,so we recommend: **Small to Medium Grocery Shop**, **Clothing Shop** (targeting students), and **Informal Sector** services such as **Airtime**."
                     
-                    st.write(msg)
-                    recommendations.append(msg)
-                    st.markdown('</div>', unsafe_allow_html=True)
-
-                # --- LOGIC 2: SCHOOLS ---
-                with col2:
-                    st.markdown('<div class="insight-card border-green"><div class="card-title">School Zone Strategy</div>', unsafe_allow_html=True)
-                    if dist_school < 100 or len(schools) > 5:
-                        msg = f"**High Student Economy:** We detected {len(schools)} schools nearby (closest: '{name_school}' at {int(dist_school)}m). **Strategy:** Pivot to **Stationery/Books**, **Uniforms**, **Barber Shop**, or a **Tuckshop** focused on snacks/drinks."
-                        st.success(msg)
+                    # PRIORITY 2: NO SCHOOLS logic (Detailed Density Breakdown)
+                    elif schools.empty: 
+                        base_msg = "No schools nearby. "
+                        if final_strategy == "High Density area detected!!":
+                            msg_retail = base_msg + "So there are no tertiary institutions and its a high density with small to medium income earners so Focus on **Tuck Shops with small packaging(Tsaona)**, **Small Grocery shops**,**Hardware** supplies,clothing(mabhero),beauty and cosmetics or plastics shop."
+                        elif final_strategy == "Medium Density detected!!":
+                            rec_str = "**Supermarket**" if supermarkets.empty else "**Grocery Shop,Super market** (check competition)"
+                            msg_retail = base_msg + f"Recommended: {rec_str}, **This is a medium dansity area and there are no supermarkets or grocery shops nearby so focus on Tuck Shop with small to medium packaging,Medium grocery store,average clothing store,tech shop with average gaugates**, or **Boutique**."
+                        else: # Low Density
+                            # Logic: check Supermarkets -> if none -> suggest supermarket, clothing, liquor
+                            rec_str = ""
+                            if supermarkets.empty:
+                                rec_str = "This is a low density surbab and most of the population are more likely medium to high income earners and there is no supermarkets nearby. This creates the gape so better focus on a **Supermarket**, **Clothing Stores**, or **Liquor Stores** (especially if there are less than 3 bars nearby)."
+                            else:
+                                rec_str = "This is a low density surbab and most of the population are more likely medium to high income earners but there is a Supermarkets close.You are encouraged to consider a **High Quality Grocery Store that can compete a supermarket** or **Niche Boutique**."
+                            msg_retail = base_msg + rec_str
+                # PRIORITY 3: Standard Supermarket/Density Logic (Schools exist but no Uni)
                     else:
-                        msg = f"**General Residential Zone:** Nearest school ('{name_school}') is {int(dist_school)}m away with low density ({len(schools)} schools). Focus strategy purely on general household population needs rather than students."
-                        st.info(msg)
-                    recommendations.append(msg)
+                        # --- DEFINE SITUATION (FAR vs CLOSE) ---
+                        # If list is empty or distance is huge (e.g. dummy 99999 value), treat as "FAR"
+                        if supermarkets.empty or dist_super > 5000:
+                            is_far = True
+                            context_str = "no major supermarket was found in the immediate vicinity"
+                        else:
+                            # Standard check
+                            if dist_super > 400:
+                                is_far = True
+                                context_str = f"the closest supermarket ('{name_super}') is {int(dist_super)}m away"
+                            else:
+                                is_far = False
+                                context_str = f"the closest supermarket ('{name_super}') is {int(dist_super)}m away"
+
+                        # --- APPLY RECOMMENDATIONS BASED ON DENSITY & DISTANCE ---
+                        if final_strategy == "High Density":
+                            if is_far: 
+                                msg_retail = f"This site is in a **High Density** location, the area associated with low income earners. Since {context_str} (which offers a gap in the market), I encourage you to focus on a **Tuck Shop with smaller packages (Tsaona)**, or a **Medium Grocery Shop**, **Small Hardware**, or a **Beverage Shop**."
+                            else: 
+                                msg_retail = f"This site is in a **High Density** location, the area associated with low income earners. Since {context_str} (which is too close), we have discovered competition nearby. Focus mainly on a **Tuck Shop with smaller packages (Tsaona)** and other things that are expensive in supermarkets such as **Vegetables**. A **Hardware** is also a good option."
+                        
+                        elif final_strategy == "Medium Density":
+                            if is_far: 
+                                msg_retail = f"This site is in a **Medium Density** location. Since {context_str}, I encourage a **Medium Grocery Shop** that bridges the gap between a supermarket and a tuck shop. Alternatively, consider a **Clothing Store**, **Boutique**, or **Hardware**."
+                            else: 
+                                msg_retail = f"This site is in a **Medium Density** location with competition nearby (as {context_str}). Encourage a **High Competitive Grocery Shop**, or focus on other things such as a **Butchery**."
+
+                        else: # Low Density
+                            base_low = "This is a **Low Density** suburb, an area mainly populated by high income earners."
+                            if is_far: 
+                                msg_retail = f"{base_low} Since {context_str}, I recommend a **Large Supermarket**, **High-Level Clothing Store**, **Pharmacy**, **Liquor Store**, or **Beauty and Cosmetics**."
+                            else: 
+                                msg_retail = f"{base_low} Since {context_str}, you can do a **Supermarket but venture with a different style**, or focus on other things such as **Horticulture**."
+
+                    st.write(msg_retail)
+                    recommendations.append(msg_retail)
                     st.markdown('</div>', unsafe_allow_html=True)
+                # --- LOGIC 2: EDUCATION & FOOD (Tertiary vs School & Food) ---
+                with col2:
+                    # PRIORITY 1: University/Polytechnic (Handles Food Strategy here)
+                    if dist_uni < 500:
+                        st.markdown('<div class="insight-card border-green"><div class="card-title">Tertiary Education Market</div>', unsafe_allow_html=True)
+                        msg = f"**Student Food Economy:** The site is less than 500 meters from a Polytechnic, College, or University ('{name_uni}'). We recommend **Fast Foods services** like (**Chicken Inn, Nandos, KFC**) and **Vending**."
+                        st.success(msg)
+                        recommendations.append(msg)
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    
+                    # PRIORITY 2: Standard Schools
+                    elif not schools.empty:
+                        st.markdown('<div class="insight-card border-green"><div class="card-title">School Zone Strategy</div>', unsafe_allow_html=True)
+                        if dist_school < 200 or len(schools) > 5:
+                            msg = f"**Student Hub:**The Closest school is '{name_school}' ({int(dist_school)}m). Pivot to **Stationery**, **Uniforms**, **Barber**, or **Snacks** with a mix of groceries."
+                            st.success(msg)
+                            recommendations.append(msg)
+                        else:
+                            msg = f"**General Residential:**Based on proximity to schools,the nearest school to the site is '{name_school}' and is {int(dist_school)}m away,which is too far to affect our site. So Focus on general household needs."
+                            st.info(msg)
+                            recommendations.append(msg)
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    
+                    # PRIORITY 3: No Education Facilities
+                    else:
+                        st.markdown('<div class="insight-card border-green"><div class="card-title">Education Zone</div>', unsafe_allow_html=True)
+                        st.write("No specific education strategy required (see Retail).")
+                        st.markdown('</div>', unsafe_allow_html=True)
 
                 col3, col4 = st.columns(2)
                 
                 # --- LOGIC 3: HEALTH ---
                 with col3:
                     st.markdown('<div class="insight-card border-red"><div class="card-title">Health Strategy</div>', unsafe_allow_html=True)
-                    if dist_health > 500:
-                        msg = f"**Healthcare Gap Detected:** The closest facility ('{name_health}') is {int(dist_health)}m away. **Opportunity:** Residents lack immediate access to basic meds. Recommend stocking **Pain Eaze, Flu remedies, and First Aid** supplies at a small scale."
+                    if health.empty:
+                         msg = f"**Healthcare Gap:** No facilities found nearby. Residents lack access. **Strong Opportunity:** Stock **Pain Eaze, Flu remedies, First Aid**."
+                         st.warning(msg)
+                    elif dist_health > 500:
+                        msg = f"**Healthcare Gap:** Closest facility is '{name_health}' ({int(dist_health)}m). **Opportunity:** Stock **Pain Eaze, Flu remedies, First Aid**."
                         st.warning(msg)
                     else:
-                        msg = f"**Well Serviced Area:** '{name_health}' is only {int(dist_health)}m away. Medical supplies are not a priority gap here. Stick to standard convenience items."
-                        st.info(msg)
+                        msg = f"**Well Serviced:** The closest health facility is '{name_health}' and is {int(dist_health)}m away. Medical supplies are likely not a priority."
+                        st.success(msg)
                     recommendations.append(msg)
                     st.markdown('</div>', unsafe_allow_html=True)
 
                 # --- LOGIC 4: NIGHTLIFE ---
                 with col4:
-                    st.markdown('<div class="insight-card border-orange"><div class="card-title">Nightlife</div>', unsafe_allow_html=True)
-                    if len(alcohol) > 3 or dist_night < 100:
-                        msg = f"**Night Economy Active:** Located just {int(dist_night)}m from '{name_night}' with {len(alcohol)} venues nearby. **Strategy:** Extend operating hours and stock high-margin nightlife conveniences (Cigarettes, Condoms, Airtime)."
-                        st.warning(msg)
+                    st.markdown('<div class="insight-card border-orange"><div class="card-title">Night Economy</div>', unsafe_allow_html=True)
+                    dist_night, name_night = get_nearest_details(alcohol, user_pt)
+                    if dist_night < 200:
+                        msg = f"**Active Nightlife:** Close to '{name_night}' ({int(dist_night)}m). Suitable for **Fast Food**, **Late-night Vending**."
+                        st.write(msg)
                     else:
-                        msg = "**Quiet Zone:** Low nightlife activity detected. Standard operating hours recommended."
-                        st.info(msg)
+                        msg = "Quiet Zone: No immediate nightlife. Align hours with day-time retail."
+                        st.write(msg)
                     recommendations.append(msg)
                     st.markdown('</div>', unsafe_allow_html=True)
-                
-                st.session_state['recommendations'] = recommendations
 
-        # --- REPORTING (PDF DOWNLOAD) ---
+                # --- SAVE RESULTS FOR REPORTING TAB ---
+                st.session_state['analysis_results'] = {
+                    'suburb_text': display_text_suburbs,
+                    'strategy': final_strategy,
+                    'recommendations': recommendations,
+                    'stats': {
+                        'Population Label': display_pop_label,
+                        'Population Value': display_pop_val,
+                        'Schools Found': len(schools),
+                        'Universities Found': len(universities),
+                        'Supermarkets Found': len(supermarkets),
+                        'Health Facilities': len(health)
+                    }
+                }
+                
+                st.success("✅ Analysis Complete! Go to the 'Reporting' tab to download your PDF.")
+
         elif selection == "Reporting":
-            st.title("Reporting & Extracts")
-            st.info("Download the strategic insights from your last analysis.")
+            st.title("Strategic Reporting")
             
-            if st.session_state['analysis_active'] and st.session_state['recommendations']:
-                # Preview
-                with st.expander("Preview Report Content"):
-                    st.write(f"**Target Zone:** {st.session_state['selected_suburb']}")
-                    for r in st.session_state['recommendations']: st.write(f"- {r}")
+            res = st.session_state.get('analysis_results')
+            
+            if res:
+                st.subheader("Current Analysis Summary")
                 
-                # Generate PDF Button
-                pdf_bytes = generate_pdf(st.session_state['selected_suburb'], st.session_state['selected_strategy'], st.session_state['recommendations'])
-                b64 = base64.b64encode(pdf_bytes).decode()
-                href = f'<a href="data:application/octet-stream;base64,{b64}" download="Injecta_Market_Report.pdf" style="text-decoration:none;"><button style="background-color:#0F2C59;color:white;padding:12px 25px;border:none;border-radius:5px;cursor:pointer;font-weight:bold;font-size:16px;">📥 DOWNLOAD PDF REPORT</button></a>'
-                st.markdown(href, unsafe_allow_html=True)
+                # Display Overall View text as requested
+                st.markdown("#### Overall Site View")
+                s = res['stats']
+                st.write(f"**Location:** {res['suburb_text']}")
+                st.write(f"**Demographics:** {s['Population Label']} of {s['Population Value']}")
+                st.write(f"**Facilities Nearby:** {s['Schools Found']} Schools, {s['Universities Found']} Universities, {s['Supermarkets Found']} Supermarkets, {s['Health Facilities']} Health Clinics.")
+                
+                st.divider()
+                
+                # Generate PDF
+                pdf_bytes = generate_pdf(res['suburb_text'], res['strategy'], res['recommendations'], res['stats'])
+                
+                st.download_button(
+                    label="📥 Download Full Strategic Report (PDF)",
+                    data=pdf_bytes,
+                    file_name="Injecta_Analytics_Report.pdf",
+                    mime="application/pdf"
+                )
             else:
-                st.warning("⚠️ No analysis data found. Please run a 'Market Engine' analysis first.")
+                st.info("No analysis data found. Please go to 'Market Engine', select a location, and click 'Analyze' first.")
+                st.image("https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?q=80&w=2070", use_container_width=True)
 
-        # --- ABOUT US (EMBED HTML) ---
         elif selection == "About Us":
-            # Embed the HTML code stored in the variable at the top
             components.html(INJECTA_WEBSITE_HTML, height=800, scrolling=True)
 
-        # --- CONTACT US ---
         elif selection == "Contact Us":
-            st.title("📞 Contact Us")
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown("""
-                <div style="background:white; padding:30px; border-radius:10px; border-left:5px solid #0F2C59; box-shadow:0 4px 15px rgba(0,0,0,0.05);">
-                    <h3 style="color:#0F2C59;">Get in Touch</h3>
-                    <p style="font-size:16px;">We are ready to assist you with advanced location intelligence.</p>
-                    <br>
-                    <p><b>📧 Email:</b> <a href="mailto:ministermukumba27@gmail.com">ministermukumba27@gmail.com</a></p>
-                    <p><b>📱 Phone:</b> +263 78 435 6427</p>
-                </div>
-                """, unsafe_allow_html=True)
-            with c2:
-                with st.form("contact_form"):
-                    st.text_input("Your Name")
-                    st.text_input("Your Email")
-                    st.text_area("Message")
-                    st.form_submit_button("SEND MESSAGE")
+            st.header("Get In Touch")
+            st.write("Send us a message and we will get back to you shortly.")
+            contact_form = f"""
+            <form action="https://formsubmit.co/your_email@example.com" method="POST">
+                <input type="hidden" name="_captcha" value="false">
+                <input type="text" name="name" placeholder="Your Name" required style="width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 5px;">
+                <input type="email" name="email" placeholder="Your Email" required style="width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 5px;">
+                <textarea name="message" placeholder="Your Message" required style="width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 5px; height: 150px;"></textarea>
+                <button type="submit" style="background-color: #0F2C59; color: white; padding: 12px 20px; border: none; border-radius: 5px; cursor: pointer; width: 100%; font-weight: bold;">SEND MESSAGE</button>
+            </form>
+            """
+            st.markdown(contact_form, unsafe_allow_html=True)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
